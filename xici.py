@@ -109,7 +109,6 @@ class pool():
                 else:
                     ip = 'https://'+host+':'+port                
                     self.set_db(ip, cate)     
-                print(ip+'\t加入')
             
             ips2 = ip_table.find_all('tr')[1:]
             for ip in ips2:
@@ -121,7 +120,6 @@ class pool():
                 else:
                     ip = 'https://'+host+':'+port                
                     self.set_db(ip, cate)  
-                print(ip+'\t加入')
             time.sleep(500)
               
     def set_db(self, ip, cate):
@@ -130,7 +128,8 @@ class pool():
             sql = "INSERT INTO %s (ip) VALUES('%s')" % (cate, ip)
             self.cursor.execute(sql)
             self.db.commit()
-            self.lock.release()          
+            self.lock.release() 
+            print(ip+'\t加入')           
         except IntegrityError:
             self.lock.release()          
         
