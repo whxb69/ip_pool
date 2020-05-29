@@ -21,27 +21,17 @@ class pool():
         self.db = pymysql.connect(host='localhost', user='root', password='11010312', db='ip_pool', port=3306, charset='utf8')
         self.cursor = self.db.cursor()
         self.lock = Lock()
-        self.tmp_https = []
-        self.tmp_http = []
+        self.tmp = []
 
     def set_tmp(self):
-        if not self.tmp_http:
-            sql = 'SELECT ip FROM http'
+        if not self.tmp:
+            sql = 'SELECT ip FROM ips'
             self.lock.acquire()
             self.cursor.execute(sql)
             self.lock.release()
             ips = self.cursor.fetchall()
-            self.tmp_http = []#暂存ip
-            [self.tmp_http.append(ip[0]) for ip in ips] 
-        
-        if not self.tmp_https:
-            sql = 'SELECT ip FROM https'
-            self.lock.acquire()
-            self.cursor.execute(sql)
-            self.lock.release()
-            ips = self.cursor.fetchall()
-            self.tmp_https = []#暂存ip
-            [self.tmp_https.append(ip[0]) for ip in ips] 
+            self.tmp = []#暂存ip
+            [self.tmp.append(ip[0]) for ip in ips] 
         
     def run(self):
         th1 = Thread(target=self.get_ip, args=('http',))
@@ -54,30 +44,21 @@ class pool():
 
         self.set_tmp()        
         for _ in range(2):
-            th3 = Thread(target=self.check_ip, args=('http',))
-            th3.start()
-            self.ths.append(th3)
-        
-        for _ in range(2):
-            th3 = Thread(target=self.check_ip, args=('https',))
+            th3 = Thread(target=self.check_ip)
             th3.start()
             self.ths.append(th3)
         
         for th in self.ths:
             th.join()
 
-    def check_ip(self, tar='http'):
+    def check_ip(self):
         print('开始检查')
-        if tar == 'http':
-            tar_que = self.tmp_http
-        else:
-            tar_que = self.tmp_https
             
         headers = {'User-Agent': self.ua.random}          
-        while tar_que:
-            while len(tar_que)<5:
+        while self.tmp:
+            while len(self.tmp)<5:
                 time.sleep(500)
-            ip = tar_que.pop(0)
+            ip = self.tmp.pop(0)
             
             # conn = aiohttp.TCPConnector(verify_ssl=False)
             # async with aiohttp.ClientSession(connector=conn) as session:
@@ -95,28 +76,28 @@ class pool():
             #         print(ip+'\t丢弃')
             
             try:
-                proxies = {tar:tar + '://' + ip}
+                proxies = {'https':'https://' + ip, 'http':'http://' + ip}
                 res = requests.get('http://httpbin.org/ip', headers = headers, proxies = proxies, timeout = 20).status_code
                 if res == 200:
                     print(ip+'\t验证')
-                    self.set_100(tar, ip)
-                    tar_que.append(ip)
+                    self.set_100(ip)
+                    self.tmp.append(ip)
                 else:
-                    self.decrease(tar, ip)
+                    self.decrease(ip)
             except Exception as e:
-                self.decrease(tar, ip)
+                self.decrease(ip)
         time.sleep(2000)
-        return self.check_ip(tar)
+        return self.check_ip()
     
-    def decrease(self, tar, ip):
-        sql = "SELECT score FROM %s WHERE ip = '%s'" % (tar, ip)
+    def decrease(self, ip):
+        sql = "SELECT score FROM ips WHERE ip = '%s'" % (ip)
         self.lock.acquire()            
         if self.cursor.execute(sql):
             score = self.cursor.fetchone()[0]
         self.lock.release()  
         
         if score>1:
-            sql = "UPDATE %s SET score = score-1 WHERE ip = '%s'" % (tar, ip)
+            sql = "UPDATE ips SET score = score-1 WHERE ip = '%s'" % (ip)
             try:
                 self.lock.acquire()            
                 self.cursor.execute(sql)
@@ -126,10 +107,10 @@ class pool():
             except Exception as e:
                 self.lock.release()
         else:
-            self.del_ip(tar, ip)               
+            self.del_ip(ip)               
              
-    def set_100(self, tar, ip):
-        sql = "UPDATE %s SET score = '%d' WHERE ip = '%s'" % (tar, 100, ip)
+    def set_100(self, ip):
+        sql = "UPDATE ips SET score = '%d' WHERE ip = '%s'" % (100, ip)
         try:
             self.lock.acquire()            
             self.cursor.execute(sql)
@@ -138,12 +119,11 @@ class pool():
         except Exception as e:
             self.lock.release()
         
-    def del_ip(self, tar, ip):
-        sql = "DELETE FROM %s WHERE ip = '%s'" % (tar,ip)
-        tar_que = eval('self.tmp_'+tar)
+    def del_ip(self, ip):
+        sql = "DELETE FROM ips WHERE ip = '%s'" % (ip)
         try:
-            if ip in tar_que:
-                tar_que.remove(ip)
+            if ip in self.tmp:
+                self.tmp.remove(ip)
             self.lock.acquire()            
             self.cursor.execute(sql)
             self.db.commit()
@@ -151,7 +131,6 @@ class pool():
             print(ip+'\t丢弃')                     
         except Exception as e:
             self.lock.release()
-            # self.del_ip(tar, ip)            
         
     def get_ip(self, cate):
         num=1
@@ -174,29 +153,21 @@ class pool():
             for ip in ips1:
                 host = ip.find_all('td')[1]
                 port = ip.find_all('td')[2]
-                if cate == 'http':
-                    ip = 'http://'+host+':'+port
-                    self.set_db(ip, cate) 
-                else:
-                    ip = 'https://'+host+':'+port                
-                    self.set_db(ip, cate)     
+                ip = host + ':' + port
+                self.set_db(ip, cate) 
             
             ips2 = ip_table.find_all('tr')[1:]
             for ip in ips2:
                 host = ip.find_all('td')[1].text
                 port = ip.find_all('td')[2].text
-                if cate == 'http':
-                    ip = 'http://'+host+':'+port
-                    self.set_db(ip, cate) 
-                else:
-                    ip = 'https://'+host+':'+port                
-                    self.set_db(ip, cate)  
+                ip = host + ':' + port
+                self.set_db(ip) 
             time.sleep(1000)
               
-    def set_db(self, ip, cate):
+    def set_db(self, ip):
         try:
             self.lock.acquire()
-            sql = "INSERT INTO %s (ip) VALUES('%s')" % (cate, ip)
+            sql = "INSERT INTO ips (ip) VALUES('%s')" % (ip)
             self.cursor.execute(sql)
             self.db.commit()
             self.lock.release() 
